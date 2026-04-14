@@ -117,19 +117,6 @@ export default function Navbar() {
                 </span>
               </a>
 
-              {/* Àrea client */}
-              <Link
-                href="/login"
-                className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-medium border transition-all duration-200",
-                  isScrolled
-                    ? "border-slate-300 text-slate-700 hover:border-brand-400 hover:text-brand-700"
-                    : "border-white/30 text-white hover:border-white hover:bg-white/10"
-                )}
-              >
-                Àrea Client
-              </Link>
-
               {/* CTA principal */}
               <Link
                 href="#contacte"
@@ -220,19 +207,6 @@ export default function Navbar() {
                   </motion.div>
                 ))}
 
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: navLinks.length * 0.05 + 0.1 }}
-                >
-                  <Link
-                    href="/login"
-                    onClick={handleNavClick}
-                    className="flex items-center px-4 py-3 rounded-xl text-slate-700 font-medium hover:bg-brand-50 hover:text-brand-700 transition-colors"
-                  >
-                    Àrea Client
-                  </Link>
-                </motion.div>
               </nav>
 
               {/* Footer drawer */}
