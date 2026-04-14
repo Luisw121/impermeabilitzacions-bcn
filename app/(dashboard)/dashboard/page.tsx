@@ -1,62 +1,100 @@
-/**
- * app/(dashboard)/dashboard/page.tsx
- * Dashboard client — resum de pressupostos, factures i obres
- */
-
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { budgets, invoices } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { getSession } from "@/lib/session";
 import Link from "next/link";
-import { formatCurrency, formatDate } from "@/lib/utils";
 import {
-  FileText,
-  Image as ImageIcon,
-  Receipt,
-  Shield,
-  LogOut,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  XCircle,
+  FileText, Receipt, Shield, Clock, CheckCircle,
+  ImageIcon, Phone, Download, ExternalLink,
 } from "lucide-react";
 import SignOutButton from "./SignOutButton";
 
+// ── Dades de demostració ────────────────────────────────────────────────────
+const MOCK_BUDGETS = [
+  {
+    id: "1",
+    reference: "PRES-2025-0042",
+    serviceType: "Impermeabilització de terrassa transitable",
+    address: "C/ Provença, 234, 4t 2a",
+    city: "Barcelona",
+    amount: 340000,
+    status: "accepted" as const,
+    pdfUrl: "#",
+    createdAt: new Date("2025-03-10"),
+    visitDate: new Date("2025-03-12"),
+  },
+  {
+    id: "2",
+    reference: "PRES-2025-0078",
+    serviceType: "Tractament d'humitats per capil·laritat — soterrani",
+    address: "Av. Diagonal, 87, local",
+    city: "Barcelona",
+    amount: 185000,
+    status: "sent" as const,
+    pdfUrl: "#",
+    createdAt: new Date("2025-04-01"),
+    visitDate: new Date("2025-04-03"),
+  },
+  {
+    id: "3",
+    reference: "PRES-2025-0091",
+    serviceType: "Impermeabilització de coberta plana amb grava",
+    address: "C/ Major, 12, esc. B",
+    city: "L'Hospitalet de Llobregat",
+    amount: null,
+    status: "pending" as const,
+    pdfUrl: null,
+    createdAt: new Date("2025-04-10"),
+    visitDate: null,
+  },
+];
+
+const MOCK_INVOICES = [
+  {
+    id: "1",
+    reference: "FAC-2025-0019",
+    budgetRef: "PRES-2025-0042",
+    amount: 340000,
+    paid: true,
+    paidAt: new Date("2025-03-28"),
+    pdfUrl: "#",
+  },
+];
+
+const MOCK_PHOTOS = [
+  { id: "1", phase: "before", caption: "Estat inicial — eflorescències i filtracions", date: "12 mar 2025" },
+  { id: "2", phase: "during", caption: "Aplicació primera capa membrana líquida Sika", date: "18 mar 2025" },
+  { id: "3", phase: "during", caption: "Reforç perimetral juntes i boneres", date: "19 mar 2025" },
+  { id: "4", phase: "after", caption: "Resultat final — acabat impermeabilitzat", date: "21 mar 2025" },
+];
+
 const STATUS_CONFIG = {
-  pending: { label: "Pendent", icon: Clock, color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-200" },
-  sent: { label: "Enviat", icon: FileText, color: "text-brand-600", bg: "bg-brand-50", border: "border-brand-200" },
-  accepted: { label: "Acceptat", icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
-  rejected: { label: "Rebutjat", icon: XCircle, color: "text-red-600", bg: "bg-red-50", border: "border-red-200" },
-  invoiced: { label: "Facturat", icon: Receipt, color: "text-violet-600", bg: "bg-violet-50", border: "border-violet-200" },
+  pending:  { label: "Pendent visita", color: "text-amber-700",  bg: "bg-amber-50",   border: "border-amber-200",  dot: "bg-amber-500" },
+  sent:     { label: "Enviat",         color: "text-brand-700",  bg: "bg-brand-50",   border: "border-brand-200",  dot: "bg-brand-500" },
+  accepted: { label: "Acceptat",       color: "text-emerald-700",bg: "bg-emerald-50", border: "border-emerald-200",dot: "bg-emerald-500" },
+  rejected: { label: "Rebutjat",       color: "text-red-700",    bg: "bg-red-50",     border: "border-red-200",    dot: "bg-red-500" },
+  invoiced: { label: "Facturat",       color: "text-violet-700", bg: "bg-violet-50",  border: "border-violet-200", dot: "bg-violet-500" },
 } as const;
 
+const PHASE_CONFIG = {
+  before: { label: "Abans",  bg: "bg-slate-100",   text: "text-slate-700" },
+  during: { label: "Durant", bg: "bg-amber-100",   text: "text-amber-700" },
+  after:  { label: "Després",bg: "bg-emerald-100", text: "text-emerald-700" },
+} as const;
+
+function formatCurrency(cents: number) {
+  return new Intl.NumberFormat("ca-ES", { style: "currency", currency: "EUR" }).format(cents / 100);
+}
+
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("ca-ES", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+}
+
 export default async function DashboardPage() {
-  const session = await auth();
+  const session = await getSession();
+  if (!session) redirect("/login");
 
-  if (!session?.user) {
-    redirect("/login");
-  }
-
-  // Obtenir pressupostos i factures de l'usuari
-  const [userBudgets, userInvoices] = await Promise.all([
-    db
-      .select()
-      .from(budgets)
-      .where(eq(budgets.userId, session.user.id as string))
-      .orderBy(desc(budgets.createdAt))
-      .limit(10),
-    db
-      .select()
-      .from(invoices)
-      .where(eq(invoices.userId, session.user.id as string))
-      .orderBy(desc(invoices.createdAt))
-      .limit(5),
-  ]);
-
-  const pendingBudgets = userBudgets.filter((b) => b.status === "pending").length;
-  const acceptedBudgets = userBudgets.filter((b) => b.status === "accepted").length;
-  const pendingInvoices = userInvoices.filter((i) => !i.paid).length;
+  const pendingCount  = MOCK_BUDGETS.filter(b => b.status === "pending").length;
+  const acceptedCount = MOCK_BUDGETS.filter(b => b.status === "accepted").length;
+  const unpaidCount   = MOCK_INVOICES.filter(i => !i.paid).length;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -64,247 +102,201 @@ export default async function DashboardPage() {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="container flex items-center justify-between h-16">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-brand">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-brand shrink-0">
               <Shield className="w-4 h-4 text-white" aria-hidden />
             </div>
-            <div>
-              <span className="font-bold text-slate-900 text-sm">ImperPro BCN</span>
-              <span className="hidden sm:inline text-slate-400 text-sm"> · </span>
-              <span className="hidden sm:inline text-slate-500 text-sm">Àrea Client</span>
-            </div>
+            <span className="font-bold text-slate-900 text-sm">ImperPro BCN</span>
+            <span className="hidden sm:inline text-slate-300">·</span>
+            <span className="hidden sm:inline text-slate-500 text-sm">Àrea Client</span>
+            <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold uppercase tracking-wide">
+              Demo
+            </span>
           </div>
-
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
-              <p className="text-sm font-medium text-slate-900">{session.user.name ?? "Client"}</p>
-              <p className="text-xs text-slate-500">{session.user.email}</p>
+              <p className="text-sm font-medium text-slate-900">{session.name}</p>
+              <p className="text-xs text-slate-400">{session.email}</p>
             </div>
             <SignOutButton />
           </div>
         </div>
       </header>
 
-      <main className="container py-8">
-        {/* Benvinguda */}
+      <main className="container py-8 max-w-5xl">
+        {/* Salutació */}
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-900 mb-1">
-            Benvingut, {session.user.name?.split(" ")[0] ?? "Client"} 👋
+            Benvingut, {session.name.split(" ")[0]} 👋
           </h1>
-          <p className="text-slate-600">
-            Aquí pots consultar l&apos;estat dels teus pressupostos, factures i fotos d&apos;obra.
+          <p className="text-slate-500 text-sm">
+            Aquí trobaràs els teus pressupostos, factures i el seguiment fotogràfic de les obres.
           </p>
         </div>
 
-        {/* Stats ràpides */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* KPIs */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           {[
-            { label: "Pressupostos totals", value: userBudgets.length, icon: FileText, color: "text-brand-600", bg: "bg-brand-50" },
-            { label: "Pendents de resposta", value: pendingBudgets, icon: Clock, color: "text-amber-600", bg: "bg-amber-50" },
-            { label: "Treballs acceptats", value: acceptedBudgets, icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50" },
-            { label: "Factures pendents", value: pendingInvoices, icon: Receipt, color: "text-violet-600", bg: "bg-violet-50" },
-          ].map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <div
-                key={stat.label}
-                className="bg-white rounded-2xl border border-slate-200 p-5 flex items-center gap-3"
-              >
-                <div className={`p-2.5 rounded-xl ${stat.bg} shrink-0`}>
-                  <Icon className={`w-5 h-5 ${stat.color}`} aria-hidden />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
-                  <p className="text-xs text-slate-500">{stat.label}</p>
-                </div>
+            { label: "Pressupostos",       value: MOCK_BUDGETS.length, icon: FileText,    color: "text-brand-600",   bg: "bg-brand-50" },
+            { label: "Pendents visita",    value: pendingCount,        icon: Clock,       color: "text-amber-600",   bg: "bg-amber-50" },
+            { label: "Treballs acceptats", value: acceptedCount,       icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50" },
+            { label: "Factures pendents",  value: unpaidCount,         icon: Receipt,     color: "text-violet-600",  bg: "bg-violet-50" },
+          ].map(({ label, value, icon: Icon, color, bg }) => (
+            <div key={label} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center gap-3">
+              <div className={`p-2 rounded-xl ${bg} shrink-0`}>
+                <Icon className={`w-5 h-5 ${color}`} aria-hidden />
               </div>
-            );
-          })}
+              <div>
+                <p className="text-2xl font-bold text-slate-900 leading-none">{value}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+              </div>
+            </div>
+          ))}
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Pressupostos */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="flex items-center justify-between p-5 border-b border-slate-100">
-                <h2 className="font-bold text-slate-900 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-brand-600" aria-hidden />
-                  Els meus pressupostos
-                </h2>
-                <Link
-                  href="/dashboard/pressupostos"
-                  className="text-xs text-brand-600 hover:underline font-medium"
-                >
-                  Veure tots
-                </Link>
-              </div>
+        <div className="grid lg:grid-cols-3 gap-5">
+          {/* ── Pressupostos ── */}
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <h2 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
+                <FileText className="w-4 h-4 text-brand-600" aria-hidden />
+                Pressupostos
+              </h2>
+              <span className="text-xs text-slate-400">{MOCK_BUDGETS.length} total</span>
+            </div>
 
-              {userBudgets.length === 0 ? (
-                <div className="p-8 text-center text-slate-500">
-                  <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" aria-hidden />
-                  <p className="text-sm">Encara no tens cap pressupost.</p>
-                  <Link href="/#contacte" className="text-brand-600 hover:underline text-sm mt-1 inline-block">
-                    Sol·licita el primer pressupost
-                  </Link>
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {userBudgets.map((budget) => {
-                    const statusConf = STATUS_CONFIG[budget.status];
-                    const StatusIcon = statusConf.icon;
-                    return (
-                      <div
-                        key={budget.id}
-                        className="p-4 hover:bg-slate-50 transition-colors"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-xs font-mono text-slate-500">
-                                {budget.reference}
-                              </span>
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${statusConf.bg} ${statusConf.color} ${statusConf.border}`}
-                              >
-                                <StatusIcon className="w-3 h-3" aria-hidden />
-                                {statusConf.label}
-                              </span>
-                            </div>
-                            <p className="font-medium text-slate-900 text-sm truncate">
-                              {budget.serviceType}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {budget.address}, {budget.city}
-                            </p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            {budget.amount && (
-                              <p className="font-bold text-slate-900 text-sm">
-                                {formatCurrency(budget.amount)}
-                              </p>
-                            )}
-                            <p className="text-xs text-slate-400">
-                              {formatDate(budget.createdAt)}
-                            </p>
-                            {budget.pdfUrl && (
-                              <a
-                                href={budget.pdfUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline mt-1"
-                                aria-label={`Descarregar PDF del pressupost ${budget.reference}`}
-                              >
-                                <FileText className="w-3 h-3" aria-hidden />
-                                PDF
-                              </a>
-                            )}
-                          </div>
+            <div className="divide-y divide-slate-50">
+              {MOCK_BUDGETS.map((b) => {
+                const s = STATUS_CONFIG[b.status];
+                return (
+                  <div key={b.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-[11px] font-mono text-slate-400">{b.reference}</span>
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${s.bg} ${s.color} ${s.border}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} aria-hidden />
+                            {s.label}
+                          </span>
                         </div>
+                        <p className="font-medium text-slate-900 text-sm leading-tight truncate">{b.serviceType}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{b.address} · {b.city}</p>
+                        {b.visitDate && (
+                          <p className="text-xs text-slate-400 mt-1">
+                            Visita: {formatDate(b.visitDate)}
+                          </p>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+
+                      <div className="text-right shrink-0 space-y-1">
+                        {b.amount ? (
+                          <p className="font-bold text-slate-900 text-sm">{formatCurrency(b.amount)}</p>
+                        ) : (
+                          <p className="text-xs text-slate-400 italic">Pendent</p>
+                        )}
+                        <p className="text-xs text-slate-400">{formatDate(b.createdAt)}</p>
+                        {b.pdfUrl && b.pdfUrl !== "#" ? (
+                          <a href={b.pdfUrl} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-brand-600 hover:underline"
+                            aria-label={`Descarregar PDF ${b.reference}`}>
+                            <Download className="w-3 h-3" aria-hidden />PDF
+                          </a>
+                        ) : b.pdfUrl === "#" ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-brand-400 cursor-default">
+                            <Download className="w-3 h-3" aria-hidden />PDF
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Columna lateral */}
+          {/* ── Columna lateral ── */}
           <div className="space-y-4">
             {/* Factures */}
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="flex items-center justify-between p-4 border-b border-slate-100">
-                <h2 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <h2 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                   <Receipt className="w-4 h-4 text-violet-600" aria-hidden />
                   Factures
                 </h2>
-                <Link
-                  href="/dashboard/factures"
-                  className="text-xs text-brand-600 hover:underline font-medium"
-                >
-                  Veure totes
-                </Link>
               </div>
-
-              {userInvoices.length === 0 ? (
-                <div className="p-6 text-center text-slate-500">
-                  <p className="text-sm">Cap factura disponible.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {userInvoices.map((invoice) => (
-                    <div key={invoice.id} className="p-3 flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-mono text-slate-500">{invoice.reference}</p>
-                        <p className="text-sm font-semibold text-slate-900">
-                          {formatCurrency(invoice.amount)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                            invoice.paid
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-amber-50 text-amber-700"
-                          }`}
-                        >
-                          {invoice.paid ? "Pagada" : "Pendent"}
-                        </span>
-                        {invoice.pdfUrl && (
-                          <a
-                            href={invoice.pdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label={`Descarregar factura ${invoice.reference}`}
-                            className="p-1 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
-                          >
-                            <FileText className="w-4 h-4" />
-                          </a>
-                        )}
-                      </div>
+              <div className="divide-y divide-slate-50">
+                {MOCK_INVOICES.map((inv) => (
+                  <div key={inv.id} className="px-4 py-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-mono text-slate-400">{inv.reference}</p>
+                      <p className="text-sm font-bold text-slate-900">{formatCurrency(inv.amount)}</p>
+                      {inv.paidAt && (
+                        <p className="text-xs text-slate-400">Pagada {formatDate(inv.paidAt)}</p>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${inv.paid ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                        {inv.paid ? "✓ Pagada" : "Pendent"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {/* Accés ràpid fotos */}
-            <Link
-              href="/dashboard/fotos"
-              className="flex items-center gap-3 p-4 bg-white rounded-2xl border border-slate-200 hover:border-brand-200 hover:shadow-card transition-all group"
-              aria-label="Veure fotos de les obres"
-            >
-              <div className="p-2.5 rounded-xl bg-slate-100 group-hover:bg-brand-50 transition-colors">
-                <ImageIcon className="w-5 h-5 text-slate-600 group-hover:text-brand-600 transition-colors" aria-hidden />
+            {/* Fotos d'obra */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <h2 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-slate-600" aria-hidden />
+                  Fotos de l&apos;obra
+                </h2>
               </div>
-              <div className="flex-1">
-                <p className="font-medium text-slate-900 text-sm">Fotos de les obres</p>
-                <p className="text-xs text-slate-500">Abans, durant i after</p>
+              <div className="p-3 grid grid-cols-2 gap-2">
+                {MOCK_PHOTOS.map((photo) => {
+                  const ph = PHASE_CONFIG[photo.phase as keyof typeof PHASE_CONFIG];
+                  return (
+                    <div key={photo.id} className="relative rounded-xl overflow-hidden bg-slate-100 aspect-square flex flex-col justify-end">
+                      {/* Placeholder de foto — substituir per <Image> real */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
+                        <ImageIcon className="w-8 h-8 text-slate-400" aria-hidden />
+                      </div>
+                      <div className="relative z-10 p-1.5">
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${ph.bg} ${ph.text}`}>
+                          {ph.label}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <svg
-                className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
+              <div className="px-4 pb-3">
+                <p className="text-xs text-slate-400 text-center">
+                  {MOCK_PHOTOS.length} fotos · Terrassa Provença 234
+                </p>
+              </div>
+            </div>
 
             {/* Contacte ràpid */}
             <div className="bg-gradient-brand rounded-2xl p-4 text-white">
-              <p className="font-semibold text-sm mb-1">Necessites ajuda?</p>
-              <p className="text-white/70 text-xs mb-3">
-                El nostre equip tècnic et respon en menys de 2 hores.
-              </p>
+              <p className="font-semibold text-sm mb-0.5">Necessites ajuda?</p>
+              <p className="text-white/60 text-xs mb-3">Resposta garantida en menys de 2h.</p>
               <a
-                href={`tel:${process.env.NEXT_PUBLIC_COMPANY_PHONE ?? "+34930000000"}`}
+                href={`tel:+34930000000`}
                 className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-white/20 hover:bg-white/30 transition-colors text-sm font-medium"
-                aria-label="Trucar a ImperPro BCN"
               >
+                <Phone className="w-4 h-4" aria-hidden />
                 Trucar ara
               </a>
             </div>
           </div>
+        </div>
+
+        {/* Nota demo */}
+        <div className="mt-8 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-center">
+          <p className="text-amber-800 text-xs">
+            <strong>Mode demostració</strong> — Les dades mostrades són fictícies.
+            Quan connectis la base de dades NeonDB, aquí apareixeran les dades reals dels teus clients.
+          </p>
         </div>
       </main>
     </div>

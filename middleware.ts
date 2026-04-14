@@ -1,19 +1,17 @@
 /**
- * middleware.ts
- * Protegir rutes del dashboard — redirigir a /login si no hi ha sessió
+ * middleware.ts — Demo sense NextAuth
+ * Protegeix /dashboard comprovant la cookie de sessió
  */
 
-import { auth } from "@/lib/auth";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { COOKIE_NAME } from "@/lib/session";
 
-export async function middleware(request: NextRequest) {
-  const session = await auth();
-  const isDashboard = request.nextUrl.pathname.startsWith("/dashboard");
+export function middleware(request: NextRequest) {
+  const session = request.cookies.get(COOKIE_NAME)?.value;
 
-  if (isDashboard && !session?.user) {
+  if (!session) {
     const loginUrl = new URL("/login", request.nextUrl);
-    loginUrl.searchParams.set("callbackUrl", request.nextUrl.href);
+    loginUrl.searchParams.set("callbackUrl", request.nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
   }
 

@@ -3,30 +3,34 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { loginSchema, LoginFormData } from "@/lib/validations";
 import { Loader2, Mail, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<LoginFormData>({
+  const { register, handleSubmit, formState: { errors } } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
   });
 
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
+    setError(null);
     try {
-      await signIn("resend", {
-        email: data.email,
-        callbackUrl: "/dashboard",
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: data.email }),
       });
+      if (!res.ok) throw new Error();
+      router.push("/dashboard");
+      router.refresh();
     } catch {
+      setError("Error d'accés. Torna-ho a intentar.");
       setIsLoading(false);
     }
   };
@@ -34,10 +38,7 @@ export default function LoginForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate>
       <div className="mb-4">
-        <label
-          htmlFor="email"
-          className="block text-sm font-medium text-slate-700 mb-1.5"
-        >
+        <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1.5">
           Correu electrònic
         </label>
         <div className="relative">
@@ -50,8 +51,6 @@ export default function LoginForm() {
             autoComplete="email"
             placeholder="el.teu@correu.cat"
             aria-required="true"
-            aria-invalid={!!errors.email}
-            aria-describedby={errors.email ? "email-error" : undefined}
             className={cn(
               "form-input pl-10",
               errors.email && "border-red-300 focus:ring-red-400"
@@ -60,11 +59,15 @@ export default function LoginForm() {
           />
         </div>
         {errors.email && (
-          <p id="email-error" className="mt-1 text-xs text-red-600" role="alert">
-            {errors.email.message}
-          </p>
+          <p className="mt-1 text-xs text-red-600" role="alert">{errors.email.message}</p>
         )}
       </div>
+
+      {error && (
+        <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert">
+          {error}
+        </p>
+      )}
 
       <button
         type="submit"
@@ -72,17 +75,15 @@ export default function LoginForm() {
         className="btn-cta w-full justify-center disabled:opacity-60 disabled:cursor-not-allowed"
       >
         {isLoading ? (
-          <>
-            <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
-            Enviant enllaç...
-          </>
+          <><Loader2 className="w-4 h-4 animate-spin" aria-hidden />Accedint...</>
         ) : (
-          <>
-            Rebre Enllaç d&apos;Accés
-            <ArrowRight className="w-4 h-4" aria-hidden />
-          </>
+          <>Accedir al Dashboard<ArrowRight className="w-4 h-4" aria-hidden /></>
         )}
       </button>
+
+      <p className="text-center text-xs text-slate-400 mt-3">
+        Demo — qualsevol email funciona
+      </p>
     </form>
   );
 }
