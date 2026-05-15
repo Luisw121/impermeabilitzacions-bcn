@@ -67,7 +67,7 @@ export default function Navbar() {
                     isScrolled ? "text-slate-900" : "text-white"
                   )}
                 >
-                  ImperPro
+                  jsergio86
                 </span>
                 <span
                   className={cn(
